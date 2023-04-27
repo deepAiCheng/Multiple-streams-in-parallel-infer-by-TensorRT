@@ -9,7 +9,7 @@
 
 - <font color="red">NVIDIA Jetson AGX Xavier 32GB</font>
 
-![p9ZxbVJ.png](https://s1.ax1x.com/2023/04/23/p9ZxbVJ.png)
+![device.png](./imgs/device.png)
 
 ## How to use😮
 
@@ -123,3 +123,5 @@ inference time: 133ms
 
 ## The consumption of resources while the program is running(8 video streams)🚀
 
+![jtop](./imgs/jtop.png)
+![GPU](./imgs/GPU.png)
