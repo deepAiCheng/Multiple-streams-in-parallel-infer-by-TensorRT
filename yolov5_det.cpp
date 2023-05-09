@@ -4,45 +4,35 @@
 #include "preprocess.h"
 #include "postprocess.h"
 #include "model.h"
-#include <thread>
+
 #include <iostream>
 #include <chrono>
 #include <cmath>
-#include <vector>
 #include <thread>
+#include <vector>
 #include <mutex>
 #include <condition_variable>
-#include <camera.h>
-
-
-/*
-调用相机的接口
-int main()
-{
-    bv::CameraCapture cap("video0", "test_cam_aaa");
-    cv::Mat frame = cap.readCvMat();
-    cv::imshow("test_cam_aaa", frame);
-}
-*/
-
-// 互斥锁
-std::mutex mutex_1;
-
-// 每个阶段的条件变量
-std::condition_variable stage_1;
-std::condition_variable stage_2;
-
-
+const int videoNumbers = 8;
 using namespace nvinfer1;
-
-
-std::vector<cv::Mat> imageList;
-std::vector<std::string> threadSquence;
-
 
 static Logger gLogger;
 const static int kOutputSize = kMaxNumOutputBbox * sizeof(Detection) / sizeof(float) + 1;
 
+// 互斥锁
+std::mutex mutex_1;
+// 每个阶段的条件变量
+std::condition_variable stage_1;
+std::condition_variable stage_2;
+
+std::vector<cv::Mat> imageList;
+std::vector<std::string> rtspSquence;//store the sequence of rtsp when showing images by opencv
+
+class WrapData
+{
+public:
+  cv::Mat img;
+  std::string channel;
+};
 
 void prepare_buffers(ICudaEngine* engine, float** gpu_input_buffer, float** gpu_output_buffer, float** cpu_output_buffer) {
   assert(engine->getNbBindings() == 2);
@@ -64,6 +54,7 @@ void infer(IExecutionContext& context, cudaStream_t& stream, void** gpu_buffers,
   CUDA_CHECK(cudaMemcpyAsync(output, gpu_buffers[1], batchsize * kOutputSize * sizeof(float), cudaMemcpyDeviceToHost, stream));
   cudaStreamSynchronize(stream);
 }
+
 
 
 void deserialize_engine(std::string& engine_name, IRuntime** runtime, ICudaEngine** engine, IExecutionContext** context) {
@@ -91,19 +82,22 @@ void deserialize_engine(std::string& engine_name, IRuntime** runtime, ICudaEngin
 }
 
 
-void capture_show(bv::CameraCapture& cap,int videoNumbers){
-    cv::Mat frame; 
+int capture_show(std::string& rtsp_address){
+    // WrapData Wrap_img;
+    cv::Mat frame;
+    cv::VideoCapture cap;
+    cap.open(rtsp_address);
     if (!cap.isOpened()) {
         std::cerr << "ERROR! Unable to open camera\n";
+        return -1;
     }
     for (;;)
     {
         // wait for a new frame from camera and store it into 'frame'
         auto start = std::chrono::system_clock::now();
-        frame = cap.readCvMat();
+        cap.read(frame);
         auto end = std::chrono::system_clock::now();
-        std::cout << "readCvMat time: " << std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count() << "ms" << std::endl;
-
+        std::cout << "cap.read time: " << std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count() << "ms" << std::endl;
         // check if we succeeded
         if (frame.empty()) {
             std::cerr << "ERROR! blank frame grabbed\n";
@@ -113,40 +107,38 @@ void capture_show(bv::CameraCapture& cap,int videoNumbers){
         stage_1.wait(lock, [&]
                                 { return imageList.size() < videoNumbers; });
         imageList.push_back(frame);
-        threadSquence.push_back(cap.getCameraName());
+        rtspSquence.push_back(rtsp_address);
         stage_2.notify_one();
-        
-        
     }
+    cap.release();
+    return 1;
 }
 
+
+
+
 int main(int argc, char** argv) {
-  if (argc != 3)
+  cudaSetDevice(kGpuId);
+
+  if (argc != 2)
   {
-      std::cerr << "usage: " << argv[0] << " <engine_file> <video_numbers>(maximum equals 8!!!)" << std::endl;
+      std::cerr << "usage: " << argv[0] << " <engine_file> " << std::endl;
       return -1;
   }
 
   std::string engine_name = argv[1];
-  int video_numbers = std::stoi(argv[2]);
 
-  cudaSetDevice(kGpuId);
+  std::string rtsp1="rtsp://192.168.70.215/live/test1";
+  std::string rtsp2="rtsp://192.168.70.215/live/test2";
+  std::string rtsp3="rtsp://192.168.70.215/live/test3";
+  std::string rtsp4="rtsp://192.168.70.215/live/test4";
+  std::string rtsp5="rtsp://192.168.70.215/live/test5";
+  std::string rtsp6="rtsp://192.168.70.215/live/test6";
+  std::string rtsp7="rtsp://192.168.70.215/live/test7";
+  std::string rtsp8="rtsp://192.168.70.215/live/test8";
 
-  std::vector<std::string> deviceNames;
-  std::vector<std::shared_ptr<bv::CameraCapture>> capList;
-  
-
-
-  for (size_t i = 0; i < video_numbers; i++)
-  {
-    std::string temp_name = "video" + std::to_string(i);
-    //如果不使用std::shared_ptr会发生内存泄漏
-    std::shared_ptr<bv::CameraCapture> temp_cap = std::make_shared<bv::CameraCapture>(temp_name,temp_name);
-    capList.push_back(temp_cap);
-  }
-
-
-//   Deserialize the engine from file
+  std::vector<std::string> rtspList = {rtsp1,rtsp2,rtsp3,rtsp4,rtsp5,rtsp6,rtsp7,rtsp8};//store the whole rtsp address
+  // Deserialize the engine from file
   IRuntime* runtime = nullptr;
   ICudaEngine* engine = nullptr;
   IExecutionContext* context = nullptr;
@@ -161,31 +153,26 @@ int main(int argc, char** argv) {
   float* gpu_buffers[2];
   float* cpu_output_buffer = nullptr;
   prepare_buffers(engine, &gpu_buffers[0], &gpu_buffers[1], &cpu_output_buffer);
-  
-  const int num_threads = video_numbers;
-  std::vector<std::thread> threads(num_threads);
 
-  for (int i = 0; i < num_threads; ++i) {
-    threads[i] = std::thread(capture_show, std::ref(*capList[i]), video_numbers);
+  std::vector<std::thread> threads(videoNumbers);
+  for (int i = 0; i < videoNumbers; ++i) {
+    threads[i] = std::thread(capture_show, std::ref(rtspList[i]));
   }
 
-  std::cout<<"come here"<<std::endl;
   while(1)
     {
         std::unique_lock<std::mutex> lock(mutex_1);
         if (imageList.size()>0)
         {
             stage_2.wait(lock, [&]
-                                    { return imageList.size() == video_numbers; });
+                                    { return imageList.size() == videoNumbers; });
             
-            std::cout<<"ready to infer"<<std::endl;
             // Preprocess
             auto start1 = std::chrono::system_clock::now();
             cuda_batch_preprocess(imageList, gpu_buffers[0], kInputW, kInputH, stream);
             auto end1 = std::chrono::system_clock::now();
             std::cout << "Preprocess time: " << std::chrono::duration_cast<std::chrono::milliseconds>(end1 - start1).count() << "ms" << std::endl;
 
-            // cv::Mat pr_img = preprocess_img(Wrap_images.front().img, INPUT_W, INPUT_H); // letterbox BGR to RGB & resize
             // Run inference
             auto start2 = std::chrono::system_clock::now();
             infer(*context, stream, (void**)gpu_buffers, cpu_output_buffer, kBatchSize);
@@ -206,11 +193,11 @@ int main(int argc, char** argv) {
             std::cout << "Draw bounding boxes time: " << std::chrono::duration_cast<std::chrono::milliseconds>(end4 - start4).count() << "ms" << std::endl;
 
             // Show images
-            for (size_t i = 0; i < video_numbers; i++)
+            for (size_t i = 0; i < videoNumbers; i++)
             {
-                cv::imshow(threadSquence[i], imageList[i]);
+                cv::imshow(rtspSquence[i], imageList[i]);
             }
-            threadSquence.clear();
+            rtspSquence.clear();
             imageList.clear();
             stage_1.notify_one();
         }
@@ -220,11 +207,6 @@ int main(int argc, char** argv) {
             break;
         }
     }
-  
-
-  // for (auto& t : threads) {
-  //   t.join();
-  // }
 
   // Release stream and buffers
   cudaStreamDestroy(stream);
@@ -236,6 +218,6 @@ int main(int argc, char** argv) {
   context->destroy();
   engine->destroy();
   runtime->destroy();
+
   return 0;
 }
-
