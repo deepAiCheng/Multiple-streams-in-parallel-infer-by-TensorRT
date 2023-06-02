@@ -5,6 +5,9 @@
 
 [Consumption](#The-consumption-of-resources-while-the-program-is-running(8-video-streams))
 
+[References](#References)
+
+
 ## Some infomation about device😄
 
 - <font color="red">NVIDIA Jetson Orin Nano 8GB</font>
@@ -86,3 +89,6 @@ Draw bounding boxes time: 0ms
 
 ![top](./imgs/top.png)
 ![GPU](./imgs/GPU.png)
+
+## References😙😙😙
+- https://github.com/wang-xinyu/tensorrtx.git
