@@ -7,7 +7,7 @@
 
 [References](#References)
 
-### If you like the script, please "⭐" this project!
+### If you like the script, please "⭐" this project! 3Q~~
 
 ## Some infomation about device😄
 
