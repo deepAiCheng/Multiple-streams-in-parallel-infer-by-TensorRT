@@ -7,6 +7,7 @@
 
 [References](#References)
 
+### If you like the script, please "★" this project!
 
 ## Some infomation about device😄
 
